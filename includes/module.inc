@@ -267,10 +267,10 @@ function module_load_include($type, $module, $name = NULL) {
     $name = $module;
   }
 
-  $file = './'. drupal_get_path('module', $module) ."/$name.$type";
+  $file = DRUPAL_ROOT . '/' . drupal_get_path('module', $module) ."/$name.$type";
 
   if (is_file($file)) {
-    require_once DRUPAL_ROOT . '/' . $file;
+    require_once $file;
   }
   else {
     return FALSE;
