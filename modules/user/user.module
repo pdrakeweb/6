@@ -134,12 +134,53 @@ function user_external_login($account, $edit = array()) {
  *   - An associative array whose keys are fields in the {users} table (such as
  *     uid, name, pass, mail, status) and whose values are the field's value.
  *   - A numeric user ID.
+ * @param $reset
+ *   (optional) Resets the static user cache, necessary when the user account
+ *   has been saved.
  *
  * @return
  *   A fully-loaded $user object upon successful user load or FALSE if user
  *   cannot be loaded.
  */
-function user_load($user_info = array()) {
+function user_load($user_info = array(), $reset = FALSE) {
+  static $hook_module;
+  
+  $hook = 'user_load_cache';
+
+  if (!isset($hook_module)) {
+    $modules = module_implements($hook);
+    if (!empty($modules)) {
+      $hook_module = reset($modules);
+    } 
+    else {
+      $hook_module = FALSE;
+    }
+  }
+
+  if ($hook_module !== FALSE) {
+    $function = $hook_module . '_' . $hook;
+    $return = $function($user_info, $reset);
+  } 
+  else {
+    $return = _user_load_direct($user_info);
+  }
+  return $return;
+}
+
+/**
+ * Fetch a user object.
+ *
+ * @param $user_info
+ *   Information about the user to load, consisting of one of the following:
+ *   - An associative array whose keys are fields in the {users} table (such as
+ *     uid, name, pass, mail, status) and whose values are the field's value.
+ *   - A numeric user ID.
+ *
+ * @return
+ *   A fully-loaded $user object upon successful user load or FALSE if user
+ *   cannot be loaded.
+ */
+function _user_load_direct($user_info = array()) {
   // Dynamically compose a SQL query:
   $query = array();
   $params = array();

@@ -1,0 +1,29 @@
+<?php
+
+/**
+ * Implementation of hook_install().
+ */
+function loadcache_install() {
+  drupal_install_schema('loadcache');
+}
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function loadcache_uninstall() {
+  drupal_uninstall_schema('loadcache');
+}
+
+/**
+ * Implementation of hook_schema().
+ */
+function loadcache_schema() {
+  $schema = array();
+
+  $schema['cache_user'] = drupal_get_schema_unprocessed('system', 'cache');
+  $schema['cache_user']['description'] = 'Cache table for the User module to store user objects.';
+  $schema['cache_node'] = drupal_get_schema_unprocessed('system', 'cache');
+  $schema['cache_node']['description'] = 'Cache table for the Node module to store node objects.';
+
+  return $schema;
+}
