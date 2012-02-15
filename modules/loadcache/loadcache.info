@@ -1,0 +1,4 @@
+name = Node and user caching
+description = Adds cache tables for users and nodes, as well as static caching for user_load().
+core = 6.x
+package = Pressflow
