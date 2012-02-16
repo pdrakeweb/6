@@ -1621,6 +1621,9 @@ function drupal_page_footer() {
   }
 
   module_invoke_all('exit');
+
+  // Update the hook implementation cache.
+  module_implements('', FALSE, FALSE, TRUE);
 }
 
 /**
@@ -2501,8 +2504,8 @@ function drupal_to_js($var) {
  *   (optional) If set, the variable will be converted to JSON and output.
  */
 function drupal_json($var = NULL) {
-  // We are returning JavaScript, so tell the browser.
-  drupal_set_header('Content-Type: text/javascript; charset=utf-8');
+  // Changed to text/html from text/javascript to work in all browsers.
+  drupal_set_header('Content-Type: text/html; charset=utf-8');
 
   if (isset($var)) {
     echo drupal_to_js($var);
@@ -2607,7 +2610,7 @@ function drupal_valid_token($token, $value = '', $skip_anonymous = FALSE) {
  *     failed. See xmlrpc_error().
  */
 function xmlrpc($url) {
-  require_once './includes/xmlrpc.inc';
+  require_once DRUPAL_ROOT . '/includes/xmlrpc.inc';
   $args = func_get_args();
   return call_user_func_array('_xmlrpc', $args);
 }
@@ -2619,16 +2622,16 @@ function _drupal_bootstrap_full() {
     return;
   }
   $called = 1;
-  require_once './includes/theme.inc';
-  require_once './includes/pager.inc';
-  require_once './includes/menu.inc';
-  require_once './includes/tablesort.inc';
-  require_once './includes/file.inc';
-  require_once './includes/unicode.inc';
-  require_once './includes/image.inc';
-  require_once './includes/form.inc';
-  require_once './includes/mail.inc';
-  require_once './includes/actions.inc';
+  require_once DRUPAL_ROOT . '/includes/theme.inc';
+  require_once DRUPAL_ROOT . '/includes/pager.inc';
+  require_once DRUPAL_ROOT . '/includes/menu.inc';
+  require_once DRUPAL_ROOT . '/includes/tablesort.inc';
+  require_once DRUPAL_ROOT . '/includes/file.inc';
+  require_once DRUPAL_ROOT . '/includes/unicode.inc';
+  require_once DRUPAL_ROOT . '/includes/image.inc';
+  require_once DRUPAL_ROOT . '/includes/form.inc';
+  require_once DRUPAL_ROOT . '/includes/mail.inc';
+  require_once DRUPAL_ROOT . '/includes/actions.inc';
   // Set the Drupal custom error handler.
   set_error_handler('_drupal_error_handler');
   set_exception_handler('_drupal_exception_handler');

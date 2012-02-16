@@ -1,0 +1,444 @@
+<?php
+
+/**
+ * @file
+ * Provides user and node load cacheing administration and debugging tools.
+ * NOTE: when using persistent node caching, do not depend on the author's last logged in time in the node object unless you call node_load with $reset = TRUE
+ */
+
+/**
+ * Implementation of hook_flush_caches().
+ */
+function loadcache_flush_caches() {
+  return array('cache_node','cache_user');
+}
+
+/**
+ * Implementation of hook_menu().
+ */
+function loadcache_menu() {
+  $items = array();
+
+  $items['admin/reports/loadcache'] = array(
+    'title' => 'Object cacheing',
+    'description' => "Get a report about your site's object cacheing performance.",
+    'page callback' => 'loadcache_report',
+    'access arguments' => array('administer site configuration'),
+    'file' => 'loadcache.admin.inc',
+  );
+
+  $items['admin/reports/loadcache/stats'] = array(
+    'title' => 'Stats',
+    'file' => 'loadcache.admin.inc',
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => -10
+  );
+
+  $items['admin/reports/loadcache/inspect'] = array(
+    'title' => 'Mismatches',
+    'description' => "View mismatched objects from test mode.",
+    'page callback' => 'loadcache_mismatch_report',
+    'access arguments' => array('administer site configuration'),
+    'type' => MENU_LOCAL_TASK,
+    'file' => 'loadcache.admin.inc',
+  );
+
+  $items['admin/reports/loadcache/inspect/%loadcache_mismatch'] = array(
+    'description' => "Inspect a mismatched object from test mode.",
+    'page callback' => 'loadcache_mismatch_item',
+    'page arguments' => array(4),
+    'access arguments' => array('administer site configuration'),
+    'type' => MENU_CALLBACK,
+    'file' => 'loadcache.admin.inc',
+  );
+
+  return $items;
+}
+
+/**
+ * Implementation of hook_form_FORM_ID_alter() for system_performance_settings().
+ */
+function loadcache_form_system_performance_settings_alter(&$form, &$form_state) {
+  // Reorder form elements
+  $form['page_cache']['#weight'] = -3;
+  $form['block_cache']['#weight'] = -2;
+
+  $form['loadcache'] = array(
+    '#type' => 'fieldset',
+    '#title' => t('Object cache'),
+    '#description' => t('Allows cacheing objects such as nodes and users to persistent storage.'),
+    '#weight' => -1,
+    );
+
+  $form['loadcache']['node_load_persistent_cache'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Node persistent cache'),
+    '#return_value' => TRUE,
+    '#default_value' => variable_get('node_load_persistent_cache', FALSE),
+    '#description' => t('Enables persistent node object cacheing.  Static node cacheing cannot be disabled.  NOTE: when using persistent node caching, the last logged in time for the author as stored in the node object may be inaccurate.'),
+  );
+
+  $form['loadcache']['user_load_cache'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('User cache'),
+    '#return_value' => TRUE,
+    '#default_value' => variable_get('user_load_cache', FALSE),
+    '#description' => t('Enables static user object cacheing.'),
+  );
+
+  $form['loadcache']['user_load_persistent_cache'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('User persistent cache'),
+    '#return_value' => TRUE,
+    '#default_value' => variable_get('user_load_persistent_cache', FALSE),
+    '#description' => t('Enables persistent user object cacheing.'),
+  );
+
+  $form['loadcache']['loadcache_statistics'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Record statistics'),
+    '#return_value' => TRUE,
+    '#default_value' => variable_get('loadcache_statistics', FALSE),
+    '#description' => t('Record cache hits and misses.  See the <a href="@report-page">Object cache report</a>.', array('@report-page' => url('admin/reports/loadcache'))),
+  );
+
+  $form['loadcache']['loadcache_test_mode'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Test mode'),
+    '#return_value' => TRUE,
+    '#default_value' => variable_get('loadcache_test_mode', FALSE),
+    '#description' => t('Test mode only compares cached objects to queried objects.  Fresh queried objects are always used.  See the <a href="@report-page">Object mismatch report</a>.', array('@report-page' => url('admin/reports/loadcache/inspect'))),
+  );
+}
+
+/**
+ * Function for testing and logging the results of a cache.
+ *
+ * @param $cached
+ *   The cached result to test.
+ * @param $queried
+ *   The queried result to test against.
+ * @param $type
+ *   The type of cache we are testing.
+ */
+function loadcache_result_test(&$cached, &$queried, $type) {
+  $diff = array_diff_assoc((array)$queried, (array)$cached);
+  if (empty($diff)) {
+    loadcache_stats('hit', $type);
+  }
+  else {
+    // Minimize backtrace memory usage.
+    $backtrace_options = (defined('DEBUG_BACKTRACE_IGNORE_ARGS') && defined('DEBUG_BACKTRACE_PROVIDE_OBJECT')) ? DEBUG_BACKTRACE_IGNORE_ARGS | DEBUG_BACKTRACE_PROVIDE_OBJECT : FALSE;
+    loadcache_stats('mismatch', $type);
+    $mismatch_log = array(
+      'type' => $type,
+      'queried' => $queried,
+      'diff_queried' => array_diff_assoc((array)$queried, (array)$cached),
+      'diff_cached' => array_diff_assoc((array)$cached, (array)$queried),
+      'backtrace' => debug_backtrace($backtrace_options),
+    );
+    // Forget this function.
+    array_shift($mismatch_log['backtrace']);
+
+    // Cache the mismatch
+    $id = 'loadcache_mismatch_' . md5(serialize(array($cached, $queried)));
+    cache_set($id, $mismatch_log, 'cache', CACHE_TEMPORARY);
+
+    // Update the index.
+    $func = $mismatch_log['backtrace'][2]['function'];
+    $cache = cache_get('loadcache_mismatch_index');
+    $index = ($cache) ? $cache->data : array();
+    $index[] = array('id' => $id, 'type' => $type, 'caller' => $func);
+    cache_set('loadcache_mismatch_index', $index, 'cache', CACHE_TEMPORARY);
+
+    // Log the mismatch
+    watchdog('loadcache', $type . ' cache mismatch: '. $func);
+  }
+}
+
+/**
+ * Load a loadcache mismatch to inspect.
+ *
+ * @param $id
+ *  cache id of the mismatch.
+ * @return
+ *  result of cache_get() for the given id.
+ */
+function loadcache_mismatch_load($id) {
+  return cache_get($id);
+}
+
+/**
+ * Update loadcache statistics.
+ *
+ * @param $status
+ *  The result of the cache operation (hit, miss, mismatch).
+ * @param $type
+ *  The type of object being loaded.
+ * @return
+ *  If called with no arguments, return current stats.
+ */
+function loadcache_stats($status = NULL, $type = NULL) {
+  static $stats = array();
+  if (!variable_get('loadcache_statistics', FALSE)) {
+    return FALSE;
+  }
+  if (isset($status) && isset($type)) {
+    if (empty($stats[$type])) {
+      $stats[$type] = array('hit' => 0, 'miss' => 0, 'mismatch' => 0);
+    }
+    $stats[$type][$status]++;
+  } 
+  else {
+    if ($cache = cache_get('loadcache_stats')) {
+      $total_stats = $cache->data;
+    } 
+    else {
+      $total_stats = array();
+    }
+    foreach($stats as $type => $type_stats) {
+      foreach($type_stats as $stype => $stat) {
+        $total_stats[$type][$stype] = $total_stats[$type][$stype] + $stat;
+      }
+    }
+    cache_set('loadcache_stats', $total_stats, 'cache', CACHE_TEMPORARY);
+    $stats = array();
+  }
+  
+  return $stats;
+}
+
+/**
+ * Implementation of hook_exit().
+ */
+function loadcache_exit() {
+  // Save our stats in the totals
+  loadcache_stats();
+}
+
+/**
+ * Implementation of hook_node_load_cache().
+ * 
+ * @param array or int $param
+ *  The parameters to search by (or nid)
+ * @param int $revision
+ *  The revision to load
+ * @param boolean $reset
+ *  Whether this call should reset cache
+ */
+function loadcache_node_load_cache($param = array(), $revision = NULL, $reset = NULL) {
+  static $nodes = array();
+
+  $cachable = ($revision == NULL);
+  $cid = ($cachable && is_numeric($param) && variable_get('node_load_persistent_cache', FALSE)) ? $param : FALSE;
+
+  // If we are resetting, clear the static and persistent cache
+  if ($reset) {
+    if ($cid) {
+      cache_clear_all($cid, 'cache_node');
+    }
+    elseif (variable_get('node_load_persistent_cache', FALSE)) {
+      cache_clear_all('*', 'cache_node', TRUE);
+    }
+    $nodes = array();
+  }
+
+  // Is the node statically cached?
+  if ($cachable && is_numeric($param) && isset($nodes[$param])) {
+    return is_object($nodes[$param]) ? drupal_clone($nodes[$param]) : $nodes[$param];
+  }
+
+  // Is the node in persistent cache?
+  elseif (!$reset && $cid && $cache = cache_get($cid, 'cache_node')) {
+    loadcache_stats('hit', 'node-persistent');
+
+    // Testing Mode : record the results of the test and return the real node object
+    if (variable_get('loadcache_test_mode', FALSE)) {
+      $node = _node_load_direct($param, $revision, $reset);
+      loadcache_result_test($cache->data, $node, 'node-persistent');
+    }
+    // Live Mode : return a clone of the cached node object
+    else {
+      $node = $cache->data;
+      $nodes[$node->nid] = is_object($node) ? drupal_clone($node) : $node;
+    }
+  } 
+
+  // Load node directly.
+  else {
+    if (!$reset && $cid) {
+      loadcache_stats('miss', 'node-persistent');
+    }
+
+    $node = _node_load_direct($param, $revision, $reset, FALSE);
+
+    // If loaded, cache node where allowed.
+    if ($node && $node->nid && $cachable) {
+      $nodes[$node->nid] = is_object($node) ? drupal_clone($node) : $node;
+
+      if (variable_get('node_load_persistent_cache', FALSE) &&
+          !(in_array($nodes[$param]->type, variable_get('cache_node_anonymous_types', array())) && user_is_anonymous()) &&
+          !in_array($node->type, variable_get('cache_node_exclude_types', array('poll')))) {
+        cache_set($node->nid, $node, 'cache_node');
+      }
+    }
+  }
+
+  return $node;
+}
+
+/**
+ * Implementation of hook_user_load_cache.
+ *
+ * @param array or int $user_info
+ * @param boolean $reset
+ */
+function loadcache_user_load_cache($user_info = array(), $reset = FALSE) {
+  static $users = array();
+
+  // Pass-through if all user cache is disabled.
+  if (!(variable_get('user_load_cache', FALSE) || (variable_get('user_load_persistent_cache', FALSE)))) {
+    return _user_load_direct($user_info);
+  }
+
+  // Validate argument and determine if uid is our only criteria.  Always use is_numeric because 0 is a uid.
+  if (is_numeric($user_info)) {
+    $uid = $user_info;
+    $user_info = array('uid' => $user_info);
+  }
+  // uid in array is too common not to cache.
+  elseif (is_array($user_info)) {
+    $uid = (count($user_info) == 1 && isset($user_info['uid']) && is_numeric($user_info['uid'])) ? $user_info['uid'] : FALSE;
+  }
+  else {
+    return FALSE;
+  }
+
+  // Determine static and persistent cache ids.
+  $sid = (is_numeric($uid) && variable_get('user_load_cache', FALSE)) ? $uid : FALSE;
+  // $cid is prepended with a string because 0 is a valid uid, but invalid memcache id.
+  $cid = (is_numeric($uid) && variable_get('user_load_persistent_cache', FALSE)) ? "user/$uid" : FALSE;
+
+  // If we are resetting, clear the static [and persistent] cache
+  if ($reset) {
+    if ($cid) {
+      cache_clear_all($cid, 'cache_user');
+    }
+    elseif (variable_get('user_load_persistent_cache', FALSE)) {
+      cache_clear_all('*', 'cache_user', TRUE);
+    }
+    $users = array();
+  }
+
+  // Is the user statically cached?
+  if (!$reset && is_numeric($sid) && isset($users[$sid])) {
+    loadcache_stats('hit', 'user-static');
+
+    // Testing Mode : record the results of the test and return the real user object
+    if (variable_get('loadcache_test_mode', FALSE)) {
+      $user = _user_load_direct($user_info);
+      loadcache_result_test($users[$sid], $user, 'user-static');
+    }
+    // Live Mode : return a clone of the cached user object
+    else {
+      $user = drupal_clone($users[$sid]);
+    }
+  }
+
+  // Is the user in persistent cache?
+  elseif (!$reset && $cid && $cache = cache_get($cid, 'cache_user')) {
+    loadcache_stats('hit', 'user-persistent');
+
+    // Testing Mode : record the results of the test and return the real user object
+    if (variable_get('loadcache_test_mode', FALSE)) {
+      $user = _user_load_direct($user_info);
+      loadcache_result_test($cache->data, $user, 'user-persistent');
+    }
+    // Live Mode : return the cached user object.
+    else {
+      $user = $cache->data;
+      if (variable_get('user_load_cache', FALSE)) {
+        $users[$user->uid] = drupal_clone($user);
+      }
+    }
+  }
+
+  // User object was not in cache
+  else {
+    if (!$reset) {
+      // Record cache misses.
+      if (is_numeric($sid)) {
+        loadcache_stats('miss', 'user-static');
+      }
+      if ($cid) {
+        loadcache_stats('miss', 'user-persistent');
+      }
+    }
+
+    // Get the user directly and cache as appropriate.
+    if ($user = _user_load_direct($user_info)) {
+
+      if (variable_get('user_load_cache', FALSE)) {
+        $users[$user->uid] = drupal_clone($user);
+      }
+
+      if (variable_get('user_load_persistent_cache', FALSE)) {
+        cache_set("user/$user->uid", $user, 'cache_user');
+      }
+    }
+  }
+
+  return $user;
+}
+
+/**
+ * Implementation of hook_nodeapi.
+ */
+function loadcache_nodeapi(&$node, $op, $a3 = NULL, $a4 = NULL) {
+  if (($op == 'update' || $op == 'delete') && variable_get('node_load_persistent_cache', FALSE) && !in_array($node->type, variable_get('cache_node_exclude_types', array('poll')))) {
+    // Flush node from cache.
+    loadcache_flush_user_node_cache($node->nid, NULL, TRUE);
+  }
+}
+
+/**
+ * Implementation of hook_user.
+ */
+function loadcache_user($op, &$edit, &$account, $category = NULL) {
+  if (variable_get('user_load_persistent_cache', FALSE)) {
+    switch($op) {
+      // Flush the user and all of the user's nodes from cache on user update
+      case 'delete':
+      case 'update':
+        cache_clear_all('user/'.$account->uid, 'cache_user');
+        loadcache_flush_user_node_cache($account->uid);
+        break;
+      // Flush the user from cache on login
+      case 'login':
+        cache_clear_all('user/'.$account->uid, 'cache_user');
+        break;
+    }
+  }
+}
+
+/**
+ * The node object caches the user object.  Thus, whenever a user is updated,
+ * we have to flush the appropriate node objects.
+ */
+function loadcache_flush_user_node_cache($uid) {
+  $result = db_query('SELECT nid FROM {node} WHERE uid = %d', $uid);
+  // Flush all nodes owned by this user, as the node object includes the
+  // user object.
+  while ($node = db_fetch_object($result)) {
+    loadcache_node_load_cache($node->nid, NULL, TRUE);
+  }
+}
+
+/**
+ * Implementation of hook_comment.
+ */
+function loadcache_comment(&$a1, $op) {
+  if ($op == 'insert' || $op == 'update' || $op == 'delete') {
+    loadcache_node_load_cache($a1['nid'], NULL, TRUE);
+  }
+}
