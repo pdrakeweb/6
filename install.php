@@ -52,6 +52,18 @@ function install_main() {
   drupal_load('module', 'system');
   drupal_load('module', 'filter');
 
+  // Load the cache infrastructure using a "fake" cache implementation that
+  // does not attempt to write to the database. We need this during the initial
+  // part of the installer because the database is not available yet. We
+  // continue to use it even when the database does become available, in order
+  // to preserve consistency between interactive and command-line installations
+  // (the latter complete in one page request and therefore are forced to
+  // continue using the cache implementation they started with) and also
+  // because any data put in the cache during the installer is inherently
+  // suspect, due to the fact that Drupal is not fully set up yet.
+  require_once DRUPAL_ROOT . '/includes/cache-install.inc';
+  $conf['cache_inc'] = './includes/cache-install.inc';
+
   // Install profile chosen, set the global immediately.
   // This needs to be done before the theme cache gets 
   // initialized in drupal_maintenance_theme().
@@ -66,12 +78,6 @@ function install_main() {
   $verify = install_verify_settings();
 
   if ($verify) {
-    // Since we have a database connection, we use the normal cache system.
-    // This is important, as the installer calls into the Drupal system for
-    // the clean URL checks, so we should maintain the cache properly.
-    require_once DRUPAL_ROOT . '/includes/cache.inc';
-    $conf['cache_inc'] = './includes/cache.inc';
-
     // Establish a connection to the database.
     require_once DRUPAL_ROOT . '/includes/database.inc';
     db_set_active();
@@ -83,13 +89,6 @@ function install_main() {
     }
   }
   else {
-    // Since no persistent storage is available yet, and functions that check
-    // for cached data will fail, we temporarily replace the normal cache
-    // system with a stubbed-out version that short-circuits the actual
-    // caching process and avoids any errors.
-    require_once DRUPAL_ROOT . '/includes/cache-install.inc';
-    $conf['cache_inc'] = './includes/cache-install.inc';
-
     $task = NULL;
   }
 
