@@ -66,9 +66,6 @@ function install_main() {
     $profile = preg_replace('/[^a-zA-Z_0-9]/', '', $_GET['profile']);
   }
 
-  // Set up theme system for the maintenance page.
-  drupal_maintenance_theme();
-
   // Check existing settings.php.
   $verify = install_verify_settings();
 
@@ -86,6 +83,9 @@ function install_main() {
   else {
     $task = NULL;
   }
+
+  // Set up theme system for the maintenance page.
+  drupal_maintenance_theme();
 
   // No profile was passed in GET, ask the user.
   if (empty($_GET['profile'])) {
