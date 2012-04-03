@@ -61,11 +61,11 @@ function install_main() {
   // continue using the cache implementation they started with) and also
   // because any data put in the cache during the installer is inherently
   // suspect, due to the fact that Drupal is not fully set up yet.
-  require_once './includes/cache-install.inc';
+  require_once DRUPAL_ROOT . '/includes/cache-install.inc';
   $conf['cache_inc'] = './includes/cache-install.inc';
 
   // Install profile chosen, set the global immediately.
-  // This needs to be done before the theme cache gets 
+  // This needs to be done before the theme cache gets
   // initialized in drupal_maintenance_theme().
   if (!empty($_GET['profile'])) {
     $profile = preg_replace('/[^a-zA-Z_0-9]/', '', $_GET['profile']);
@@ -495,7 +495,7 @@ function install_select_profile_form(&$form_state, $profile_files) {
     $names[$profile->name] = $name;
   }
 
-  // Display radio buttons alphabetically by human-readable name. 
+  // Display radio buttons alphabetically by human-readable name.
   natcasesort($names);
   foreach ($names as $profile => $name) {
     $form['profile'][$name] = array(
@@ -958,7 +958,7 @@ More details about installing Pressflow are available in INSTALL.txt.', array('@
         drupal_set_message($message, 'warning');
       }
     }
-  } 
+  }
 }
 
 /**
