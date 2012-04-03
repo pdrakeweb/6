@@ -1499,7 +1499,7 @@ function _drupal_bootstrap($phase) {
       break;
 
     case DRUPAL_BOOTSTRAP_SESSION:
-      require_once variable_get('session_inc', './includes/session.inc');
+      require_once DRUPAL_ROOT . '/' . variable_get('session_inc', 'includes/session.inc');
       drupal_session_initialize();
       break;
 
